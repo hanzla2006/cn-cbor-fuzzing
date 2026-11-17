@@ -17,12 +17,12 @@ direct CVE request to MITRE.
 
 | Field | Value |
 |-------|-------|
-| **Class** | CWE-125 out-of-bounds read (primary); CWE-704 misaligned access (secondary) |
-| **Location** | `ntoh32p` macro, `src/cn-cbor.c:95`; crash observed at the call site `src/cn-cbor.c:219` (`ntoh32p(pos)` for a 4-byte field), also reachable via `ntoh64p` at `:114`/`:116` for 8-byte fields |
+| **Class** | CWE-125 Out-of-bounds Read (primary); CWE-704 Incorrect Type Conversion or Cast (the root-cause `unsigned long` cast). UBSan also reports a misaligned load as a side effect of the same cast. |
+| **Location** | `ntoh32p` macro, `src/cn-cbor.c:95`; crash observed at the call site `src/cn-cbor.c:219` (`ntoh32p(pos)` for a 4-byte argument). The 8-byte path via `ntoh64p` (`:114`/`:116`) is reachable by inspection but was not observed to fault under ASan in testing |
 | **Tested commit** | `f713bf6` |
-| **Build** | default (`CBOR_ALIGN_READS` undefined) |
+| **Affected versions** | tag `1.0.0` and master through `f713bf6`, default build (`CBOR_ALIGN_READS` undefined); only `f713bf6` was dynamically tested |
 | **Architectures** | **LP64 only** (64-bit Linux, macOS, BSD); reproduced on x86-64. Not ARM-specific, but also not present on ILP32 or LLP64, see Scope below |
-| **Impact** | denial of service on little-endian (crash under a hardened allocator / guard page); potential information disclosure on big-endian LP64 (see severity notes) |
+| **Impact** | denial of service: a conditional crash, only when the input ends at unmapped memory (not attacker-controlled). A big-endian information-disclosure case exists by analysis but is largely theoretical and untested (see severity notes). Not code execution. |
 | **Reproducer** | [`crash-oob-read-ai4.cbor`](crash-oob-read-ai4.cbor), the 5 bytes `1a 00 01 02 03`; also three valid seeds (`03_uint32`, `10_tag_epoch`, `15_single_float`) |
 | **Sanitizer log** | [`asan-oob-read.log`](asan-oob-read.log), generated from the harness via [`../tools/repro.c`](../tools/repro.c) |
 | **Disclosure** | [issue #24](https://github.com/jimsch/cn-cbor/issues/24), filed 2026-11-14; CVE request submitted to MITRE (CNA-LR) |
@@ -46,10 +46,12 @@ only validates `n` (= 4) bytes are present, so `ntoh32p` reads **4 bytes past**
 the validated end of the input buffer. With an exact-size heap allocation this
 is a heap-buffer-overflow read; the same cast is also an unaligned access.
 
-This is reachable with ordinary, well-formed CBOR, not just a crafted input:
-three of the valid seeds in [`../corpus/`](../corpus/) that end in a 4-byte
-field (`03_uint32`, `10_tag_epoch`, `15_single_float`) each trigger the overread
-on the unpatched default build.
+The general trigger is any well-formed message where a **4-byte argument**, that
+is a 32-bit integer, a `float32`, or a 4-byte byte-string / text-string / array /
+map length, falls within the last 4 bytes of the input. Confirmed on the
+unpatched default build with `1a 00 01 02 03` (uint32), `fa 3f 80 00 00`
+(float32), `5a 00 00 00 00` (byte-string length), and `9a 00 00 00 00` (array
+length). It is reachable with ordinary valid CBOR, not just crafted input.
 
 ### Scope: LP64 only
 
@@ -105,11 +107,14 @@ byte order, because the 8-byte load is narrowed to `ntohl`'s 32-bit argument:
   field's own 4 bytes, so the decoded value is correct and the overread bytes
   are discarded. Realistic impact is a crash (DoS) on a guard page or hardened
   allocator. This is the configuration tested here.
-- **Big-endian LP64** (analysis, not tested): the low 32 bits selected would be
-  the 4 overread bytes rather than the field, so the decoded integer could
-  reflect adjacent heap memory. On such targets this is potentially an
-  information leak, not only a crash. Flagged as analysis pending a test on
-  big-endian hardware.
+- **Big-endian LP64** (analysis, not tested): the low 32 bits selected are the 4
+  bytes *after* the field rather than the field itself, so every 4-byte integer
+  would decode from the following bytes. For an in-bounds field that is simply a
+  wrong value, which means the default build is likely already unusable on
+  big-endian LP64; only a field at the very end of the buffer turns it into an
+  over-read that may expose adjacent memory. The information-disclosure scenario
+  is therefore largely theoretical and untested.
 
-Either way the impact is denial of service or information disclosure, not code
-execution, and any CVSS score should reflect that.
+The realistic impact is denial of service (a crash, and only when the input
+happens to end at unmapped memory, which the attacker does not control), not
+code execution. Any CVSS score should reflect that conditional crash.

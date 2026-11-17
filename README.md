@@ -2,7 +2,7 @@
 
 A coverage-guided fuzzing harness and campaign targeting [**jimsch/cn-cbor**](https://github.com/jimsch/cn-cbor) at commit `f713bf6`, a compact C implementation of CBOR (RFC 8949) used in constrained IoT and embedded devices.
 
-> **Finding #1:** heap out-of-bounds read (CWE-125, with secondary CWE-704 misalignment) in the integer decode path. `ntoh32p` casts a 4-byte field pointer to `unsigned long` (8 bytes on LP64) and reads 4 bytes past the bounds-checked end. Triggered by the 5-byte input `1a 00 01 02 03`; reproduces on x86-64 and is **LP64-only** (not ILP32 or 64-bit Windows), see the Scope note in the finding. Reported as [issue #24](https://github.com/jimsch/cn-cbor/issues/24); CVE pending (MITRE CNA-LR). Full detail, reproducer, and sanitizer log in [`findings/README.md`](findings/README.md).
+> **Finding #1:** heap out-of-bounds read (CWE-125) in the integer decode path, caused by an incorrect `unsigned long` cast (CWE-704, Incorrect Type Conversion or Cast). `ntoh32p` casts a 4-byte field pointer to `unsigned long` (8 bytes on LP64) and reads 4 bytes past the bounds-checked end. Triggered by the 5-byte input `1a 00 01 02 03`; reproduces on x86-64 and is **LP64-only** (not ILP32 or 64-bit Windows), see the Scope note in the finding. Reported as [issue #24](https://github.com/jimsch/cn-cbor/issues/24); CVE pending (MITRE CNA-LR). Full detail, reproducer, and sanitizer log in [`findings/README.md`](findings/README.md).
 
 ## Which cn-cbor
 

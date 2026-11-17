@@ -1,8 +1,8 @@
 diff --git a/src/cn-cbor.c b/src/cn-cbor.c
-index 7c9ecbf..6fcd49f 100644
+index 7c9ecbf..502c4e4 100644
 --- a/src/cn-cbor.c
 +++ b/src/cn-cbor.c
-@@ -90,10 +90,10 @@ static double decode_half(int half)
+@@ -90,10 +90,11 @@ static double decode_half(int half)
  
  #define ntoh8p(p) (*(unsigned char *)(p))
  
@@ -10,14 +10,15 @@ index 7c9ecbf..6fcd49f 100644
 -#define ntoh16p(p) (ntohs(*(unsigned short *)(p)))
 -#define ntoh32p(p) (ntohl(*(unsigned long *)(p)))
 -#else
-+/* Always read through memcpy into an exact-width type: this avoids both the
-+ * unaligned access (CWE-704) and, critically, the out-of-bounds read (CWE-125)
-+ * caused by casting a 4-byte field pointer to `unsigned long` (8 bytes on LP64)
-+ * in the old default path. */
++/* Read through memcpy into an exact-width type. The old default path cast the
++ * byte pointer to `unsigned long` (CWE-704, Incorrect Type Conversion or Cast),
++ * which is 8 bytes on LP64 and therefore read 4 bytes past a 4-byte field
++ * (CWE-125, Out-of-bounds Read). memcpy into uint16_t/uint32_t reads exactly
++ * the field width and is also alignment-safe. */
  static uint16_t ntoh16p(unsigned char *p)
  {
  	uint16_t tmp;
-@@ -107,7 +107,6 @@ static uint32_t ntoh32p(unsigned char *p)
+@@ -107,7 +108,6 @@ static uint32_t ntoh32p(unsigned char *p)
  	memcpy(&tmp, p, sizeof(tmp));
  	return ntohl(tmp);
  }
