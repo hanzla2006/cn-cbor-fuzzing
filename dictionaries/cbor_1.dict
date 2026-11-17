@@ -1,0 +1,42 @@
+# CBOR initial-byte tokens (RFC 8949) to speed the fuzzer toward deep parse states.
+# Major type is the high 3 bits of the first byte.
+
+# unsigned int
+"\x00"
+"\x17"
+"\x18"
+"\x19"
+"\x1a"
+"\x1b"
+# negative int
+"\x20"
+"\x37"
+# byte string
+"\x40"
+"\x58"
+"\x5f"
+# text string
+"\x60"
+"\x78"
+"\x7f"
+# array
+"\x80"
+"\x98"
+"\x9f"
+# map
+"\xa0"
+"\xb8"
+"\xbf"
+# tag
+"\xc0"
+"\xd8"
+# simple / float / break
+"\xe0"
+"\xf4"
+"\xf5"
+"\xf6"
+"\xf7"
+"\xf9"
+"\xfa"
+"\xfb"
+"\xff"
