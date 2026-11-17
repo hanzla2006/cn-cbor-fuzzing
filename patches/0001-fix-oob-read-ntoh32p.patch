@@ -1,0 +1,27 @@
+diff --git a/src/cn-cbor.c b/src/cn-cbor.c
+index 7c9ecbf..6fcd49f 100644
+--- a/src/cn-cbor.c
++++ b/src/cn-cbor.c
+@@ -90,10 +90,10 @@ static double decode_half(int half)
+ 
+ #define ntoh8p(p) (*(unsigned char *)(p))
+ 
+-#ifndef CBOR_ALIGN_READS
+-#define ntoh16p(p) (ntohs(*(unsigned short *)(p)))
+-#define ntoh32p(p) (ntohl(*(unsigned long *)(p)))
+-#else
++/* Always read through memcpy into an exact-width type: this avoids both the
++ * unaligned access (CWE-704) and, critically, the out-of-bounds read (CWE-125)
++ * caused by casting a 4-byte field pointer to `unsigned long` (8 bytes on LP64)
++ * in the old default path. */
+ static uint16_t ntoh16p(unsigned char *p)
+ {
+ 	uint16_t tmp;
+@@ -107,7 +107,6 @@ static uint32_t ntoh32p(unsigned char *p)
+ 	memcpy(&tmp, p, sizeof(tmp));
+ 	return ntohl(tmp);
+ }
+-#endif /* CBOR_ALIGN_READS */
+ 
+ static uint64_t ntoh64p(unsigned char *p)
+ {

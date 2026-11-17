@@ -1,0 +1,19 @@
+cn-cbor/src/cn-cbor.c:219:4: runtime error: load of misaligned address 0xADDR for type 'long unsigned int', which requires 8 byte alignment
+0xADDR: note: pointer points here
+ 00 00 00  1a 00 01 02 03 00 00 00  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  00 00 00 00 00
+              ^ 
+=================================================================
+==352==ERROR: AddressSanitizer: heap-buffer-overflow on address 0xADDR at pc 0xADDR bp 0xADDR sp 0xADDR
+READ of size 8 at 0xADDR thread T0
+    #0 0xADDR in decode_item cn-cbor/src/cn-cbor.c:219
+    #1 0xADDR in cn_cbor_decode cn-cbor/src/cn-cbor.c:365
+    #2 0xADDR in LLVMFuzzerTestOneInput harness/fuzz_cbor_decode.c:20
+    #3 0xADDR in main tools/repro.c:16
+
+0xADDR is located 0 bytes after 5-byte region [0xADDR,0xADDR)
+allocated by thread T0 here:
+    #0 0xADDR in malloc ../../../../src/libsanitizer/asan/asan_malloc_linux.cpp:69
+    #1 0xADDR in main tools/repro.c:13
+
+SUMMARY: AddressSanitizer: heap-buffer-overflow cn-cbor/src/cn-cbor.c:219 in decode_item
+==352==ABORTING
