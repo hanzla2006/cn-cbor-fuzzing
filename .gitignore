@@ -1,0 +1,17 @@
+# build artifacts
+fuzz_cbor_decode
+*.o
+*.a
+
+# cloned target
+/cn-cbor/
+
+# fuzzer output
+crash-*
+leak-*
+timeout-*
+oom-*
+*.profraw
+
+# keep the corpus dir but not local crash samples
+corpus/crash-*
