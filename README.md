@@ -1,42 +1,44 @@
 # cn-cbor Fuzzing Campaign
 
-A coverage-guided fuzzing harness and campaign targeting [**jimsch/cn-cbor**](https://github.com/jimsch/cn-cbor), a compact C implementation of the CBOR (Concise Binary Object Representation, RFC 8949) data format used in constrained IoT and embedded devices. The goal is to find memory-safety defects in the decoder and report them through coordinated disclosure.
+A coverage-guided fuzzing harness and campaign targeting [**jimsch/cn-cbor**](https://github.com/jimsch/cn-cbor), a compact C implementation of the CBOR (Concise Binary Object Representation, RFC 8949) data format used in constrained IoT and embedded devices.
 
-> **Status:** Active. This repository documents the methodology, harness, and build so results are reproducible. Confirmed findings are disclosed responsibly to maintainers before any public detail appears here.
+> **Finding #1:** confirmed misaligned-memory-access defect (CWE-704) in the decode path (`ntoh32p` / `ntoh64p` / `decode_half`), causing SIGBUS / undefined behavior on ARM with the library's default build. Reported upstream as [issue #24](https://github.com/jimsch/cn-cbor/issues/24); CVE ID pending (MITRE CNA-LR). DoS only, no code execution (CVSS 4.0 ≈ 6.9, Medium). Details in [`findings/README.md`](findings/README.md).
 
 ## Which cn-cbor
 
-There are two trees with the same name, and this campaign targets the original:
+There are two trees with the same name; this campaign targets the original:
 
-- **[jimsch/cn-cbor](https://github.com/jimsch/cn-cbor)** — Jim Schaad's original implementation. It is effectively **archived/unmaintained**, but a large number of downstream IoT and firmware projects still vendor this legacy tree directly into their source. A memory-safety bug here therefore has real, shipped-code impact even though upstream is quiet. **This is the repository under test.**
-- **[cose-wg/cn-cbor](https://github.com/cose-wg/cn-cbor)** — a later, more actively maintained fork. Noted only for disambiguation; it is *not* the subject of this campaign.
+- **[jimsch/cn-cbor](https://github.com/jimsch/cn-cbor)** — Jim Schaad's original implementation. The maintainer passed away in October 2020, so the tree is **unmaintained**, yet many downstream IoT and firmware projects still vendor it directly and it is **not covered by OSS-Fuzz**. A defect here therefore has real, shipped-code impact. **This is the repository under test.**
+- **[cose-wg/cn-cbor](https://github.com/cose-wg/cn-cbor)** — a later, more actively maintained fork, noted only for disambiguation. Not the subject of this campaign.
 
 ## Why cn-cbor
 
-A CBOR decoder is fed untrusted bytes by design, so a single out-of-bounds read or write in the parse path can translate into a real remote memory-safety issue on shipped firmware. cn-cbor is small, widely vendored, and written in C, which makes it a high-value, tractable target for coverage-guided fuzzing.
+A CBOR decoder is fed untrusted bytes by design, so a defect in the parse path can translate into a real issue on shipped firmware. cn-cbor is small, widely vendored, unmaintained, and off OSS-Fuzz, which makes it a high-value, tractable target.
 
 ## Approach
 
-- **Engines:** libFuzzer (in-process, coverage-guided) by default, with an **AFL++** driver provided as an alternative (`./build.sh <src> afl`).
-- **Sanitizers:** AddressSanitizer (heap/stack/global overflows, use-after-free) and UndefinedBehaviorSanitizer.
-- **Target function:** the decode entry point (`cn_cbor_decode`), which takes an attacker-controlled buffer and length.
-- **Seed corpus:** minimal valid CBOR items spanning every major type (unsigned/negative integers, byte/text strings, arrays, maps, tags, simple/float values) so the fuzzer starts with broad structural coverage.
-- **Dictionary:** CBOR initial-byte tokens to help the mutator reach deep parse states faster.
-- **Triage:** each unique crash is minimized, root-caused from the ASan report, and checked against the tested commit before any disclosure.
+- **Engine:** AFL++ in persistent mode (primary), with a libFuzzer build of the same harness as an alternative.
+- **Sanitizers:** AddressSanitizer + UndefinedBehaviorSanitizer. UBSan on AArch64 is what surfaces the unaligned reads a default x86 build tolerates silently.
+- **Harnesses:** two, both exercising attacker-controlled input — `fuzz_cbor_decode` (decode only) and `fuzz_cbor_roundtrip` (decode + re-encode).
+- **Target:** the decode entry point (`cn_cbor_decode`) and, in the roundtrip harness, `cn_cbor_encoder_write`.
+- **Seed corpus:** minimal valid CBOR items spanning every major type, for broad structural coverage.
+- **Dictionary:** CBOR initial-byte tokens to reach deep parse states faster.
+- **Triage:** each unique crash is minimized, root-caused from the sanitizer report, and pinned to the commit it reproduces on.
 
 ## Layout
 
 ```
 cn-cbor-fuzzing/
 ├── harness/
-│   └── fuzz_cbor_decode.c   # libFuzzer / AFL++ entry point (LLVMFuzzerTestOneInput)
+│   ├── fuzz_cbor_decode.c      # decode-only entry point
+│   └── fuzz_cbor_roundtrip.c   # decode + encode roundtrip
 ├── dictionaries/
-│   └── cbor.dict            # CBOR token dictionary
-├── corpus/                  # seed inputs (add your own valid CBOR samples)
+│   └── cbor.dict               # CBOR token dictionary
+├── corpus/                     # seed inputs
 ├── findings/
-│   └── README.md            # honest, running log of triaged crashes
-├── build.sh                 # builds the libFuzzer or AFL++ driver
-├── LICENSE                  # MIT (harness + scripts)
+│   └── README.md               # triaged findings (Finding #1 public)
+├── build.sh                    # builds either harness under libFuzzer or AFL++
+├── LICENSE                     # MIT (harness + scripts)
 └── README.md
 ```
 
@@ -48,29 +50,15 @@ Requires `clang` with the fuzzer + sanitizer runtimes (libFuzzer mode) or `afl-c
 # 1. Get the target (the original tree)
 git clone https://github.com/jimsch/cn-cbor.git
 
-# 2a. libFuzzer build (default): clang, libFuzzer + ASan + UBSan
-./build.sh ./cn-cbor
-
-# 2b. AFL++ build: afl-clang-fast + aflpp_driver + ASan/UBSan
+# 2. AFL++ build of the decode harness (how the finding was reproduced)
 ./build.sh ./cn-cbor afl
-```
 
-The same harness (`LLVMFuzzerTestOneInput`) compiles under both engines; the AFL++ build links AFL++'s `aflpp_driver` so no second harness file is needed.
+# alternatives:
+./build.sh ./cn-cbor                                   # libFuzzer, decode harness
+./build.sh ./cn-cbor afl harness/fuzz_cbor_roundtrip.c # AFL++, roundtrip harness
+```
 
 ## Run
-
-libFuzzer:
-
-```bash
-mkdir -p corpus
-./fuzz_cbor_decode -dict=dictionaries/cbor.dict corpus/
-
-# reproduce a saved crash
-./fuzz_cbor_decode crash-<hash>
-
-# minimize a crashing input
-./fuzz_cbor_decode -minimize_crash=1 -runs=100000 crash-<hash>
-```
 
 AFL++:
 
@@ -79,53 +67,30 @@ mkdir -p afl_out
 afl-fuzz -i corpus -o afl_out -x dictionaries/cbor.dict -- ./fuzz_cbor_decode_afl
 ```
 
-## Campaign metrics
-
-Reproducible numbers from the current campaign. Fill each value from your own run
-rather than quoting estimates; the commands that produce each figure are listed
-so the measurement is repeatable.
-
-| Metric | Value | How it was measured |
-|--------|-------|---------------------|
-| Tested commit | `<git rev-parse --short HEAD of cn-cbor>` | pinned so findings are reproducible |
-| Total runtime | `<e.g. 24h>` | wall-clock of the run below |
-| Executions/sec | `<exec/s>` | libFuzzer `-print_final_stats=1` |
-| Total executions | `<N>` | libFuzzer final stats |
-| Line / branch coverage | `<L% / B%>` | `llvm-cov report` (see below) |
-| Corpus size (pre-merge) | `<N inputs>` | raw corpus before minimization |
-| Corpus size (post-merge) | `<N inputs>` | after `-merge=1` |
-
-Generate the figures:
+libFuzzer:
 
 ```bash
-# runtime + exec/s + total execs
-./fuzz_cbor_decode -print_final_stats=1 -max_total_time=86400 \
-    -dict=dictionaries/cbor.dict corpus/
-
-# corpus minimization (pre/post counts)
-ls corpus | wc -l                                   # pre-merge
-./fuzz_cbor_decode -merge=1 corpus_min/ corpus/
-ls corpus_min | wc -l                               # post-merge
-
-# coverage: build a separate coverage binary, replay the corpus, report
-clang -fprofile-instr-generate -fcoverage-mapping -g -O1 \
-    -I./cn-cbor/include harness/fuzz_cbor_decode.c ./cn-cbor/src/*.c \
-    -fsanitize=fuzzer -o fuzz_cov
-LLVM_PROFILE_FILE=cov.profraw ./fuzz_cov -runs=0 corpus/
-llvm-profdata merge -sparse cov.profraw -o cov.profdata
-llvm-cov report ./fuzz_cov -instr-profile=cov.profdata
+mkdir -p corpus
+./fuzz_cbor_decode -dict=dictionaries/cbor.dict corpus/
+./fuzz_cbor_decode crash-<hash>                        # reproduce
+./fuzz_cbor_decode -minimize_crash=1 -runs=100000 crash-<hash>
 ```
+
+## Campaign metrics
+
+| Metric | Value |
+|--------|-------|
+| Engine | AFL++ (persistent mode) |
+| Sanitizers | ASan + UBSan |
+| Harnesses | 2 — decode-only, decode + encode roundtrip |
+| Platform | ARM64 (AArch64), Oracle Cloud instance |
+| Library build | `CN_CBOR_ALIGN_READS=OFF` (library default) |
+| Total executions | 21M+ (across both harnesses) |
+| Result | 1 defect class: misaligned memory access (CWE-704), DoS only |
 
 ## Responsible disclosure
 
-This project exists to improve the security of open-source software. Any confirmed, exploitable, or memory-unsafe defect is reported privately to the maintainers first, with a reasonable remediation window, before technical details are published here. No working exploit code is distributed. See [`findings/README.md`](findings/README.md) for the current, sanitized status.
-
-## Repository metadata
-
-For the GitHub "About" panel:
-
-- **Description:** `Coverage-guided fuzzing of the jimsch/cn-cbor CBOR decoder (libFuzzer + AFL++, ASan/UBSan).`
-- **Topics:** `fuzzing` · `libfuzzer` · `aflplusplus` · `cbor` · `iot-security` · `vulnerability-research` · `memory-safety`
+cn-cbor is unmaintained (maintainer deceased), so Finding #1 was disclosed via a public upstream [issue](https://github.com/jimsch/cn-cbor/issues/24) and a direct CVE request to MITRE rather than a private report. This log is limited to what is already public. No working exploit is distributed; the defect is a denial-of-service alignment fault, not a code-execution bug.
 
 ## License
 

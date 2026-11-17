@@ -1,32 +1,42 @@
 #!/usr/bin/env bash
 #
-# Build the cn-cbor decode fuzzer.
+# Build a cn-cbor fuzzer.
 #
-# Usage: ./build.sh <path-to-cn-cbor-source> [libfuzzer|afl]
+# Usage: ./build.sh <path-to-cn-cbor-source> [libfuzzer|afl] [harness.c]
 #
-#   libfuzzer (default) -> clang, libFuzzer + ASan + UBSan
-#   afl                 -> afl-clang-fast + aflpp_driver + ASan/UBSan
+#   mode:    libfuzzer (default) -> clang, libFuzzer + ASan + UBSan
+#            afl                 -> afl-clang-fast + aflpp_driver + ASan/UBSan
+#   harness: harness/fuzz_cbor_decode.c (default) or harness/fuzz_cbor_roundtrip.c
+#
+# The CWE-704 alignment finding reproduces on AArch64 with the library default
+# (CN_CBOR_ALIGN_READS=OFF) under UBSan, which is the configuration built here.
 #
 set -euo pipefail
 
 CN_CBOR_SRC="${1:-./cn-cbor}"
 MODE="${2:-libfuzzer}"
+HARNESS="${3:-harness/fuzz_cbor_decode.c}"
 
 if [[ ! -d "${CN_CBOR_SRC}/src" ]]; then
   echo "error: cn-cbor sources not found at ${CN_CBOR_SRC}" >&2
   echo "clone it first:  git clone https://github.com/jimsch/cn-cbor.git" >&2
   exit 1
 fi
+if [[ ! -f "${HARNESS}" ]]; then
+  echo "error: harness not found: ${HARNESS}" >&2
+  exit 1
+fi
 
+BASE="$(basename "${HARNESS}" .c)"   # e.g. fuzz_cbor_decode
 COMMON_SRC=( "-I${CN_CBOR_SRC}/include" -fno-omit-frame-pointer -g -O1
-  harness/fuzz_cbor_decode.c "${CN_CBOR_SRC}"/src/*.c )
+  "${HARNESS}" "${CN_CBOR_SRC}"/src/*.c )
 
 case "${MODE}" in
   libfuzzer)
     CC="${CC:-clang}"
-    "${CC}" -fsanitize=fuzzer,address,undefined "${COMMON_SRC[@]}" -o fuzz_cbor_decode
-    echo "built ./fuzz_cbor_decode"
-    echo "run:  ./fuzz_cbor_decode -dict=dictionaries/cbor.dict corpus/"
+    "${CC}" -fsanitize=fuzzer,address,undefined "${COMMON_SRC[@]}" -o "${BASE}"
+    echo "built ./${BASE}"
+    echo "run:  ./${BASE} -dict=dictionaries/cbor.dict corpus/"
     ;;
 
   afl)
@@ -51,9 +61,9 @@ case "${MODE}" in
       echo "       set AFL_DRIVER=/path/to/libAFLDriver.a" >&2
       exit 1
     fi
-    AFL_USE_ASAN=1 AFL_USE_UBSAN=1 "${CC}" "${COMMON_SRC[@]}" "${DRIVER}" -o fuzz_cbor_decode_afl
-    echo "built ./fuzz_cbor_decode_afl"
-    echo "run:  mkdir -p afl_out && afl-fuzz -i corpus -o afl_out -x dictionaries/cbor.dict -- ./fuzz_cbor_decode_afl"
+    AFL_USE_ASAN=1 AFL_USE_UBSAN=1 "${CC}" "${COMMON_SRC[@]}" "${DRIVER}" -o "${BASE}_afl"
+    echo "built ./${BASE}_afl"
+    echo "run:  mkdir -p afl_out && afl-fuzz -i corpus -o afl_out -x dictionaries/cbor.dict -- ./${BASE}_afl"
     ;;
 
   *)
