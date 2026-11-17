@@ -59,9 +59,9 @@ The out-of-bounds read exists only where `unsigned long` is wider than the
 4-byte field being read, i.e. **LP64** data models (64-bit Linux, macOS, BSD),
 where it is 8 bytes. On **LLP64** (64-bit Windows) and **ILP32** (most 32-bit
 microcontroller firmware), `unsigned long` is 4 bytes, so the cast reads exactly
-the field and there is no overread. The secondary misalignment (CWE-704) can
-still fault on strict-alignment 32-bit cores, but the CWE-125 overread requires
-an LP64 target. This tempers the "reaches shipped IoT firmware" impact, since a
+the field and there is no overread. The misaligned load (a side effect of
+the same cast) can still fault on strict-alignment 32-bit cores, but the CWE-125
+over-read requires an LP64 target. This tempers the "reaches shipped IoT firmware" impact, since a
 large share of constrained firmware is ILP32 and unaffected by the overread.
 
 ### Reproduce
